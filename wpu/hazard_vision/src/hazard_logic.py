@@ -8,6 +8,7 @@ from .utils import (
     HazardEvent,
     TrackedObject,
     bbox_height,
+    green_pixel_ratio_hsv,
     is_in_corridor,
     is_tall_thin_bbox,
     red_pixel_ratio_hsv,
@@ -160,14 +161,19 @@ def check_pole_ahead(
 def check_red_light(
     frame_bgr: np.ndarray,
     obj: TrackedObject,
-    red_ratio_threshold: float = 0.15,
+    red_ratio_threshold: float = 0.12,
+    red_bulb_region: str = "top",
+    green_ratio_max: float = 0.25,
 ) -> HazardEvent | None:
-    """Hazard 2 (optional): Traffic light in red state (HSV red ROI)."""
+    """Hazard 2 (optional): Traffic light in red state (HSV red ROI, top bulb)."""
     if obj.cls_name != "traffic light":
         return None
-    ratio = red_pixel_ratio_hsv(frame_bgr, obj.bbox_xyxy)
+    ratio = red_pixel_ratio_hsv(frame_bgr, obj.bbox_xyxy, bulb_region=red_bulb_region)
     if ratio < red_ratio_threshold:
         return None
+    green_ratio = green_pixel_ratio_hsv(frame_bgr, obj.bbox_xyxy)
+    if green_ratio > green_ratio_max:
+        return None  # Green reflected in top region; not red
     return HazardEvent(
         type="RED_LIGHT",
         severity="high",
@@ -190,6 +196,8 @@ def evaluate_hazards(
     corridor_width_ratio: float,
     enable_red_light: bool,
     fps: float = 20.0,
+    red_ratio_threshold: float = 0.12,
+    red_bulb_region: str = "top",
 ) -> list[HazardEvent]:
     """Evaluate all hazards for current frame."""
     events: list[HazardEvent] = []
@@ -207,6 +215,13 @@ def evaluate_hazards(
             obj, frame_width, frame_height, corridor_width_ratio
         ):
             events.append(e)
-        if enable_red_light and (e := check_red_light(frame_bgr, obj)):
+        if enable_red_light and (
+            e := check_red_light(
+                frame_bgr,
+                obj,
+                red_ratio_threshold=red_ratio_threshold,
+                red_bulb_region=red_bulb_region,
+            )
+        ):
             events.append(e)
     return events

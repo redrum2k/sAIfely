@@ -28,6 +28,12 @@ python main.py --source video --video_path ./assets/test.mp4 --display 0 --realt
 
 # With webcam (fails gracefully if no camera)
 python main.py --source webcam --cam_index 0 --display 1
+
+# Red light detection (required for green-to-red transition)
+python main.py --source video --video_path ./assets/test_footage.mp4 --display 1 --enable_red_light 1
+
+# Debug red light (log red_ratio per frame for traffic lights)
+python main.py --source video --video_path ./assets/test_footage.mp4 --display 1 --enable_red_light 1 --debug_red_light 1
 ```
 
 ## CLI Flags
@@ -45,7 +51,10 @@ python main.py --source webcam --cam_index 0 --display 1
 | `--max_fps` | - | Optional processing cap |
 | `--loop` | 0 | Repeat video |
 | `--start_sec`, `--end_sec` | - | Seek range (seconds) |
-| `--enable_red_light` | 0 | Enable red-light hazard |
+| `--enable_red_light` | 0 | Enable red-light hazard (required for green-to-red detection) |
+| `--red_ratio_threshold` | 0.12 | Red pixel ratio threshold in top bulb ROI |
+| `--red_bulb_region` | top | `top` (US layout) or `full` (legacy) |
+| `--debug_red_light` | 0 | Log red_ratio and bbox for traffic lights each frame |
 | `--corridor_width_ratio` | 0.35 | Central corridor width |
 | `--history_len` | 10 | Track history length |
 | `--cooldown_s` | 0.5 | Debounce per hazard (seconds) |
@@ -56,7 +65,7 @@ python main.py --source webcam --cam_index 0 --display 1
 1. **VEHICLE_APPROACHING** — Cars/trucks/buses in central corridor with growing bbox (TTC proxy)
 2. **PERSON_ON_COLLISION_COURSE** — Person in corridor with bbox growth
 3. **POLE_AHEAD** — Traffic lights, stop signs, fire hydrants; else tall/thin heuristic
-4. **RED_LIGHT** (optional, `--enable_red_light 1`) — Traffic light ROI, HSV red pixel ratio
+4. **RED_LIGHT** (optional, `--enable_red_light 1`) — Top bulb ROI (US layout), HSV red ratio, green rejection
 
 ## Output Format
 
@@ -71,7 +80,7 @@ HAZARD: RED_LIGHT (id=9 conf=0.6 roi_red_ratio=0.2 ...)
 
 - Uses stock YOLOv8n (COCO). No custom weights or datasets.
 - Rule-based on bbox growth and corridor position; no custom-trained classifiers.
-- Red-light detection is heuristic (HSV red ratio); may misclassify in varied lighting.
+- Red-light detection uses top-third bulb ROI (US layout: red on top). Use `--red_bulb_region full` for legacy behavior. May misclassify in varied lighting.
 - TTC proxy is approximate; not calibrated to real distance.
 - Pole heuristic (tall/thin) can have false positives.
 

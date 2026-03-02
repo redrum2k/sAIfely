@@ -14,8 +14,11 @@ DEFAULTS = {
     "start_sec": None,
     "end_sec": None,
     "enable_red_light": 0,
+    "red_ratio_threshold": 0.12,
+    "red_bulb_region": "top",
     "corridor_width_ratio": 0.35,
     "history_len": 10,
     "cooldown_s": 0.5,
     "skip": 0,
+    "debug_red_light": 0,
 }

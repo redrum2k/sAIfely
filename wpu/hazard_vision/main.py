@@ -32,6 +32,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--start_sec", type=float, default=DEFAULTS["start_sec"])
     p.add_argument("--end_sec", type=float, default=DEFAULTS["end_sec"])
     p.add_argument("--enable_red_light", type=int, choices=[0, 1], default=DEFAULTS["enable_red_light"])
+    p.add_argument("--red_ratio_threshold", type=float, default=DEFAULTS["red_ratio_threshold"])
+    p.add_argument("--red_bulb_region", choices=["top", "full"], default=DEFAULTS["red_bulb_region"])
+    p.add_argument("--debug_red_light", type=int, choices=[0, 1], default=DEFAULTS["debug_red_light"])
     p.add_argument("--corridor_width_ratio", type=float, default=DEFAULTS["corridor_width_ratio"])
     p.add_argument("--history_len", type=int, default=DEFAULTS["history_len"])
     p.add_argument("--cooldown_s", type=float, default=DEFAULTS["cooldown_s"])
@@ -57,6 +60,7 @@ def draw_overlay(
     objects: list,
     hazards: list,
     corridor_width_ratio: float,
+    debug_red_light: bool = False,
 ) -> np.ndarray:
     """Draw bboxes, labels, corridor, hazard annotations."""
     out = frame.copy()
@@ -77,6 +81,12 @@ def draw_overlay(
         cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 0), 2)
         label = f"{obj.cls_name} {obj.conf:.2f} id={obj.id}"
         cv2.putText(out, label, (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+        if debug_red_light and obj.cls_name == "traffic light":
+            from src.utils import crop_traffic_light_bulb
+
+            rx1, ry1, rx2, ry2 = map(int, crop_traffic_light_bulb(obj.bbox_xyxy, "red"))
+            cv2.rectangle(out, (rx1, ry1), (rx2, ry2), (0, 165, 255), 2)
+            cv2.putText(out, "red bulb ROI", (rx1, ry1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 165, 255), 1)
     for ev in hazards:
         if ev.object_id is not None:
             obj = next((o for o in objects if o.id == ev.object_id), None)
@@ -147,7 +157,24 @@ def main() -> int:
                 args.corridor_width_ratio,
                 bool(args.enable_red_light),
                 fps=fps,
+                red_ratio_threshold=args.red_ratio_threshold,
+                red_bulb_region=args.red_bulb_region,
             )
+
+            if args.debug_red_light and args.enable_red_light:
+                from src.utils import red_pixel_ratio_hsv
+
+                for obj in objects:
+                    if obj.cls_name == "traffic light":
+                        ratio = red_pixel_ratio_hsv(
+                            frame_resized,
+                            obj.bbox_xyxy,
+                            bulb_region=args.red_bulb_region,
+                        )
+                        print(
+                            f"DEBUG red_light: id={obj.id} red_ratio={ratio:.3f} "
+                            f"bbox={obj.bbox_xyxy}"
+                        )
 
             for ev in hazards:
                 if notifier.should_report(ev, timestamp_s):
@@ -155,7 +182,11 @@ def main() -> int:
 
             if args.display:
                 display_frame = draw_overlay(
-                    frame_resized, objects, hazards, args.corridor_width_ratio
+                    frame_resized,
+                    objects,
+                    hazards,
+                    args.corridor_width_ratio,
+                    debug_red_light=bool(args.debug_red_light),
                 )
                 cv2.imshow("Hazard Vision", display_frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):

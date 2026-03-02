@@ -78,30 +78,79 @@ def is_tall_thin_bbox(bbox_xyxy: np.ndarray | tuple, aspect_threshold: float = 0
     return aspect < aspect_threshold
 
 
+def crop_traffic_light_bulb(
+    bbox_xyxy: tuple[float, float, float, float],
+    bulb: str = "red",
+) -> tuple[float, float, float, float]:
+    """Return (x1,y1,x2,y2) for bulb region. US layout: red=top, yellow=mid, green=bot."""
+    x1, y1, x2, y2 = bbox_xyxy
+    h = y2 - y1
+    if bulb == "red":
+        return (x1, y1, x2, y1 + h / 3)
+    if bulb == "yellow":
+        return (x1, y1 + h / 3, x2, y1 + 2 * h / 3)
+    if bulb == "green":
+        return (x1, y1 + 2 * h / 3, x2, y2)
+    return (x1, y1, x2, y2)
+
+
 def red_pixel_ratio_hsv(
     frame_bgr: np.ndarray,
     bbox_xyxy: tuple[float, float, float, float],
+    bulb_region: str = "top",
 ) -> float:
-    """Crop ROI and compute ratio of red-ish pixels (HSV). Returns 0..1."""
+    """Crop ROI (bulb region of traffic light) and compute ratio of red pixels. Returns 0..1."""
     import cv2
 
-    x1, y1, x2, y2 = map(int, bbox_xyxy)
-    h, w = frame_bgr.shape[:2]
-    x1 = max(0, min(x1, w - 1))
-    x2 = max(x1 + 1, min(x2, w))
-    y1 = max(0, min(y1, h - 1))
-    y2 = max(y1 + 1, min(y2, h))
+    if bulb_region in ("red", "top"):
+        roi_bbox = crop_traffic_light_bulb(bbox_xyxy, bulb="red")
+    elif bulb_region == "full":
+        roi_bbox = bbox_xyxy
+    else:
+        roi_bbox = crop_traffic_light_bulb(bbox_xyxy, bulb=bulb_region)
+
+    x1, y1, x2, y2 = map(int, roi_bbox)
+    h_frame, w_frame = frame_bgr.shape[:2]
+    x1 = max(0, min(x1, w_frame - 1))
+    x2 = max(x1 + 1, min(x2, w_frame))
+    y1 = max(0, min(y1, h_frame - 1))
+    y2 = max(y1 + 1, min(y2, h_frame))
     roi = frame_bgr[y1:y2, x1:x2]
     if roi.size == 0:
         return 0.0
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-    # Red in HSV: hue 0-10 or 170-180, high sat, reasonable value
-    lower1 = np.array([0, 100, 100])
-    upper1 = np.array([10, 255, 255])
-    lower2 = np.array([170, 100, 100])
+    # Relaxed HSV: lower sat/value for overexposed/dim red; wider hue for LED
+    lower1 = np.array([0, 50, 50])
+    upper1 = np.array([15, 255, 255])
+    lower2 = np.array([165, 50, 50])
     upper2 = np.array([180, 255, 255])
     mask1 = cv2.inRange(hsv, lower1, upper1)
     mask2 = cv2.inRange(hsv, lower2, upper2)
     red_mask = cv2.bitwise_or(mask1, mask2)
     total = roi.shape[0] * roi.shape[1]
     return float(np.sum(red_mask > 0)) / total if total > 0 else 0.0
+
+
+def green_pixel_ratio_hsv(
+    frame_bgr: np.ndarray,
+    bbox_xyxy: tuple[float, float, float, float],
+) -> float:
+    """Ratio of green pixels in top bulb region. High green = green light reflected; avoid red false positive."""
+    import cv2
+
+    roi_bbox = crop_traffic_light_bulb(bbox_xyxy, bulb="red")
+    x1, y1, x2, y2 = map(int, roi_bbox)
+    h_frame, w_frame = frame_bgr.shape[:2]
+    x1 = max(0, min(x1, w_frame - 1))
+    x2 = max(x1 + 1, min(x2, w_frame))
+    y1 = max(0, min(y1, h_frame - 1))
+    y2 = max(y1 + 1, min(y2, h_frame))
+    roi = frame_bgr[y1:y2, x1:x2]
+    if roi.size == 0:
+        return 0.0
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    lower = np.array([35, 50, 50])
+    upper = np.array([85, 255, 255])
+    green_mask = cv2.inRange(hsv, lower, upper)
+    total = roi.shape[0] * roi.shape[1]
+    return float(np.sum(green_mask > 0)) / total if total > 0 else 0.0
